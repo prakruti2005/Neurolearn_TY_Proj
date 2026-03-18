@@ -23,6 +23,7 @@ import {
 
 import { SignLanguageAI } from "./sign-language-ai"
 import { getTranscriptionStatus, startTranscription, synthesizeSpeech } from "@/lib/aws-services"
+import { cn } from "@/lib/utils"
 
 function formatTime(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return "0:00"
@@ -271,6 +272,7 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
   const [transcribeEtaSeconds, setTranscribeEtaSeconds] = useState<number | null>(null)
   const [courseModules, setCourseModules] = useState<CourseModule[]>([])
   const [modulesLoading, setModulesLoading] = useState(false)
+  const [dyslexicFontEnabled, setDyslexicFontEnabled] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -289,6 +291,25 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
       }
     }
   }, [])
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("dyslexic-font-enabled")
+      if (stored === "1") {
+        setDyslexicFontEnabled(true)
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dyslexic-font-enabled", dyslexicFontEnabled ? "1" : "0")
+    } catch {
+      // ignore storage errors
+    }
+  }, [dyslexicFontEnabled])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -579,6 +600,9 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
       audio.pause()
       audio.currentTime = 0
     }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel()
+    }
     setSpeaking(false)
     setSpeechLoading(false)
   }
@@ -586,6 +610,24 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
   const toggleSpeech = async () => {
     if (speaking || speechLoading) {
       stopSpeech()
+      return
+    }
+
+    const transcriptText = (transcriptSegments || [])
+      .map((seg) => seg.text?.trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim()
+
+    const textToSpeak =
+      lesson.content?.trim() ||
+      transcriptText ||
+      summary?.trim() ||
+      lesson.title?.trim() ||
+      ""
+
+    if (!textToSpeak) {
+      setSpeechError("No lesson content available to read.")
       return
     }
 
@@ -598,7 +640,7 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
         audioUrlRef.current = null
       }
 
-      const { audioUrl } = await synthesizeSpeech(lesson.content, "Joanna")
+      const { audioUrl } = await synthesizeSpeech(textToSpeak, "Joanna")
       audioUrlRef.current = audioUrl
 
       const audio = new Audio(audioUrl)
@@ -608,21 +650,47 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
       audio.onended = () => {
         setSpeaking(false)
       }
+      audio.onerror = () => {
+        setSpeaking(false)
+        setSpeechError("Audio playback failed.")
+      }
 
       await audio.play()
       setSpeaking(true)
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to synthesize speech"
-      console.error("Speech playback failed", e)
-      setSpeechError(message)
-      setSpeaking(false)
+      console.error("Speech playback failed, trying browser speech fallback", e)
+
+      const canUseBrowserSpeech = typeof window !== "undefined" && "speechSynthesis" in window
+      if (canUseBrowserSpeech) {
+        try {
+          const utterance = new SpeechSynthesisUtterance(textToSpeak)
+          utterance.rate = Math.max(0.5, Math.min(playbackRate[0], 2))
+          utterance.onend = () => setSpeaking(false)
+          utterance.onerror = () => {
+            setSpeaking(false)
+            setSpeechError("Browser text-to-speech failed.")
+          }
+
+          window.speechSynthesis.cancel()
+          window.speechSynthesis.speak(utterance)
+          setSpeaking(true)
+        } catch (fallbackError) {
+          const message = fallbackError instanceof Error ? fallbackError.message : "Failed to read content"
+          setSpeechError(message)
+          setSpeaking(false)
+        }
+      } else {
+        const message = e instanceof Error ? e.message : "Failed to synthesize speech"
+        setSpeechError(message)
+        setSpeaking(false)
+      }
     } finally {
       setSpeechLoading(false)
     }
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <div className={cn("grid grid-cols-1 lg:grid-cols-4 gap-6", dyslexicFontEnabled && "dyslexic-font")}>
       <div className="lg:col-span-3 space-y-6">
         {/* Main Video/Content Area */}
         <div className="relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl group">
@@ -892,13 +960,10 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
                     ))}
                   </>
                 ) : (
-                  <>
-                    <ModuleItem title="1. Foundations" lessons={["What is Architecture?", "Historical Context"]} active />
-                    <Separator className="my-2" />
-                    <ModuleItem title="2. The CPU" lessons={["ALU & Registers", "Instruction Cycles"]} />
-                    <Separator className="my-2" />
-                    <ModuleItem title="3. Memory Systems" lessons={["Cache Hierarchy", "Virtual Memory"]} />
-                  </>
+                  <div className="py-8 px-4 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-muted-foreground/50" />
+                    <span>No outline yet. Transcribe the video then click <strong>Generate AI Outline</strong> to build the course content.</span>
+                  </div>
                 )}
               </div>
             </ScrollArea>
@@ -919,8 +984,8 @@ export function CoursePlayer({ lesson = MOCK_LESSON }: CoursePlayerProps) {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium">Dyslexic Font</span>
-              <Button variant="outline" size="sm">
-                Enable
+              <Button variant="outline" size="sm" onClick={() => setDyslexicFontEnabled((prev) => !prev)}>
+                {dyslexicFontEnabled ? "Disable" : "Enable"}
               </Button>
             </div>
           </CardContent>

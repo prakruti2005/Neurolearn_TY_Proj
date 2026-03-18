@@ -135,9 +135,7 @@ export default function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-               <HealthCheck name="AWS Polly (TTS)" status="Operational" />
                <HealthCheck name="AWS Transcribe" status="Operational" />
-               <HealthCheck name="AWS Rekognition" status="Degraded" />
                <HealthCheck name="Database (Firebase)" status="Operational" />
             </div>
           </CardContent>

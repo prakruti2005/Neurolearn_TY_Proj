@@ -69,4 +69,8 @@ const credentials = accessKeyId && secretAccessKey ? { accessKeyId, secretAccess
 export const pollyClient = new PollyClient({ region: REGION, credentials });
 export const transcribeClient = new TranscribeClient({ region: TRANSCRIBE_REGION, credentials });
 export const rekognitionClient = new RekognitionClient({ region: REGION, credentials });
-export const s3Client = new S3Client({ region: S3_REGION, credentials });
+export const s3Client = new S3Client({
+	region: S3_REGION,
+	credentials,
+	followRegionRedirects: true,
+});

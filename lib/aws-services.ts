@@ -29,7 +29,13 @@ export interface TranscriptionResult {
  * Text-to-Speech using AWS Polly
  */
 export async function synthesizeSpeech(text: string, voiceId: 'Joanna' | 'Matthew' = 'Joanna'): Promise<AudioSynthesisResult> {
-  console.log(`[AWS Polly] Synthesizing speech for: "${text.substring(0, 20)}..." using voice ${voiceId}`);
+  const normalizedText = typeof text === "string" ? text.trim() : "";
+  if (!normalizedText) {
+    throw new Error("No text provided for speech synthesis");
+  }
+
+  const preview = normalizedText.slice(0, 20);
+  console.log(`[AWS Polly] Synthesizing speech for: "${preview}..." using voice ${voiceId}`);
   
   try {
     const response = await fetch('/api/speech', {
@@ -37,11 +43,12 @@ export async function synthesizeSpeech(text: string, voiceId: 'Joanna' | 'Matthe
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text, voiceId }),
+      body: JSON.stringify({ text: normalizedText, voiceId }),
     });
 
     if (!response.ok) {
-      throw new Error(`AWS Polly error: ${response.statusText}`);
+      const json = await response.json().catch(() => ({}));
+      throw new Error(json?.error || `AWS Polly error: ${response.statusText}`);
     }
 
     const blob = await response.blob();
@@ -52,16 +59,12 @@ export async function synthesizeSpeech(text: string, voiceId: 'Joanna' | 'Matthe
     
     return {
       audioUrl,
-      duration: text.length * 0.1 // Rough estimate
+      duration: normalizedText.length * 0.1 // Rough estimate
     };
 
   } catch (error) {
     console.error("Speech synthesis failed", error);
-    // Fallback to mock if API fails (e.g. no credentials)
-    return {
-      audioUrl: '/mock-audio/lesson-1.mp3',
-      duration: 120
-    };
+    throw error instanceof Error ? error : new Error("Speech synthesis failed");
   }
 }
 

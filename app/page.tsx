@@ -28,25 +28,25 @@ export default function LandingPage() {
 
       <main className="flex-1 pt-24 md:pt-28">
         {/* Hero Section */}
-        <section className="relative pt-32 pb-32 px-4 md:pt-48 md:pb-60 overflow-hidden">
+        <section className="relative pt-20 pb-20 px-4 md:pt-32 md:pb-36 overflow-hidden">
           <div className="container mx-auto relative z-10">
-            <div className="grid lg:grid-cols-2 gap-16 items-center">
+            <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
               <div className="flex flex-col items-start text-left max-w-2xl">
                 <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full glass-card text-primary text-sm font-bold uppercase tracking-wider mb-8 animate-in fade-in slide-in-from-top-4 duration-1000 hover:scale-105 transition-transform cursor-default">
                   <HeartHandshake className="h-4 w-4 animate-pulse" />
                   <span>Empowering Every Mind</span>
                 </div>
 
-                <h1 className="text-6xl md:text-8xl lg:text-9xl font-black tracking-tight mb-8 leading-[0.9] animate-in fade-in slide-in-from-bottom-8 duration-700 drop-shadow-sm">
+                <h1 className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black tracking-tight mb-6 md:mb-8 leading-[0.98] animate-in fade-in slide-in-from-bottom-8 duration-700 drop-shadow-sm">
                   Adaptive <br />
-                  <span className="text-rainbow italic pb-2 inline-block">
+                  <span className="text-rainbow italic pb-3 pr-1 inline-block leading-[1.05]">
                     Intelligence
                   </span>{" "}
                   <br />
                   For All.
                 </h1>
 
-                <p className="text-xl md:text-2xl text-muted-foreground/90 mb-12 max-w-xl text-pretty leading-relaxed animate-in fade-in slide-in-from-bottom-12 duration-1000 delay-200">
+                <p className="text-lg md:text-xl text-muted-foreground/90 mb-10 md:mb-12 max-w-xl text-pretty leading-relaxed animate-in fade-in slide-in-from-bottom-12 duration-1000 delay-200">
                   NeuroLearn leverages neural AI to create multi-sensory learning pathways, making complex education
                   accessible to students with diverse cognitive and physical needs.
                 </p>
@@ -54,7 +54,7 @@ export default function LandingPage() {
                 <div className="flex flex-col sm:flex-row gap-5 animate-in fade-in slide-in-from-bottom-16 duration-1000 delay-300">
                   <Button
                     size="lg"
-                    className="h-14 px-10 rounded-2xl text-lg shadow-xl shadow-primary/20 group transition-all hover:scale-105 active:scale-95 bg-gradient-to-r from-primary to-secondary hover:shadow-primary/40"
+                    className="h-12 md:h-14 px-8 md:px-10 rounded-2xl text-base md:text-lg shadow-xl shadow-primary/20 group transition-all hover:scale-105 active:scale-95 bg-gradient-to-r from-primary to-secondary hover:shadow-primary/40"
                     asChild
                   >
                     <Link href="/login?mode=signup">
@@ -65,7 +65,7 @@ export default function LandingPage() {
                   <Button
                     size="lg"
                     variant="outline"
-                    className="h-14 px-10 rounded-2xl text-lg glass-card hover:bg-white/10 group bg-transparent border-primary/20"
+                    className="h-12 md:h-14 px-8 md:px-10 rounded-2xl text-base md:text-lg glass-card hover:bg-white/10 group bg-transparent border-primary/20"
                     asChild
                   >
                     <Link href="#impact">
@@ -76,8 +76,8 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              <div className="relative hidden lg:block animate-in zoom-in duration-1000 delay-500 hover:scale-[1.02] transition-transform perspective-1000">
-                <div className="relative z-20 glass-card p-10 rounded-[3rem] border-white/20 shadow-[0_0_50px_-12px_rgba(var(--primary),0.3)] backdrop-blur-3xl transform rotate-3 hover:rotate-0 transition-all duration-700 animate-float hover:shadow-[0_0_80px_-12px_rgba(var(--primary),0.5)]">
+              <div className="relative hidden md:block animate-in zoom-in duration-1000 delay-500 hover:scale-[1.02] transition-transform perspective-1000">
+                <div className="relative z-20 glass-card p-6 lg:p-10 rounded-[2rem] lg:rounded-[3rem] border-white/20 shadow-[0_0_50px_-12px_rgba(var(--primary),0.3)] backdrop-blur-3xl transform rotate-2 lg:rotate-3 hover:rotate-0 transition-all duration-700 animate-float hover:shadow-[0_0_80px_-12px_rgba(var(--primary),0.5)] max-w-[560px] ml-auto">
                   <div className="aspect-square rounded-2xl bg-muted/20 flex items-center justify-center mb-6 overflow-hidden relative group shadow-inner border border-white/10">
                     <Image 
                       src="https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1965&auto=format&fit=crop"

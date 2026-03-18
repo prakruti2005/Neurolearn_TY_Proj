@@ -71,6 +71,7 @@ export async function POST(req: Request) {
     let bucket = ""
     let region = getS3Region()
     let title = ""
+    let description = ""
     let mimeType = ""
     let size = 0
 
@@ -79,6 +80,7 @@ export async function POST(req: Request) {
       key = String(bodyJson.key || "").trim()
       bucket = String(bodyJson.bucket || "").trim()
       title = String(bodyJson.title || "").trim()
+      description = String(bodyJson.description || "").trim()
       mimeType = String(bodyJson.contentType || "application/octet-stream")
       size = Number(bodyJson.size || 0)
       
@@ -92,6 +94,7 @@ export async function POST(req: Request) {
   
       const file = form.get("file")
       title = String(form.get("title") || "").trim()
+      description = String(form.get("description") || "").trim()
       const folder = String(form.get("folder") || "content").trim() || "content"
   
       if (!(file instanceof File)) {
@@ -138,6 +141,7 @@ export async function POST(req: Request) {
 
       const docRef = await db.collection("courses").add({
         title: title || "Untitled Content",
+        description,
         assetUrl: httpsUrl,
         assetKey: key,
         bucket,

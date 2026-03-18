@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
 import { Button } from "@/components/ui/button"
@@ -23,6 +24,27 @@ import { formatDistanceToNow } from "date-fns"
 export function Navbar() {
   const { user, userProfile } = useAuth()
   const { notifications, unreadCount, markAllAsRead, markAsRead, deleteRead } = useNotifications()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return (
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-7xl">
+        <div className="glass-card rounded-full px-6 md:px-10 h-16 flex items-center justify-between backdrop-blur-2xl">
+          <Link href="/" className="flex items-center gap-2 font-black text-2xl tracking-tighter text-foreground">
+            <div className="p-1.5 bg-primary rounded-lg text-primary-foreground shadow-lg shadow-primary/30">
+              <BrainCircuit className="h-6 w-6" />
+            </div>
+            <span className="hidden sm:inline font-display">NeuroLearn</span>
+          </Link>
+          <div className="w-[172px]" />
+        </div>
+      </nav>
+    )
+  }
 
   return (
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-7xl">

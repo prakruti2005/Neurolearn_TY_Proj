@@ -3,13 +3,24 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Search, FileText, Video, Mic, Edit, Trash2, Loader2 } from "lucide-react"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   addDoc,
   collection,
-  getDocs,
+  onSnapshot,
   updateDoc,
   doc,
   serverTimestamp,
@@ -31,6 +42,7 @@ import { useAuth } from "@/contexts/auth-context"
 interface ContentItem {
   id: string
   title: string
+  description?: string
   type: string
   status: string
   students?: number
@@ -48,11 +60,46 @@ export default function ContentManagementPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<ContentItem | null>(null)
   const [editTitle, setEditTitle] = useState("")
+  const [editDescription, setEditDescription] = useState("")
   const [editType, setEditType] = useState("")
   const [editStatus, setEditStatus] = useState("")
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deletingItem, setDeletingItem] = useState<ContentItem | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [newTitle, setNewTitle] = useState("")
+  const [newDescription, setNewDescription] = useState("")
   const [newFile, setNewFile] = useState<File | null>(null)
+
+  const getRealtimeEnrollmentCount = (data: Record<string, any>): number => {
+    const numericFields = [
+      data.enrolledStudents,
+      data.studentCount,
+      data.students,
+      data.enrolledCount,
+      data.enrollmentsCount,
+    ]
+
+    for (const value of numericFields) {
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        return Math.floor(value)
+      }
+    }
+
+    const arrayFields = [
+      data.enrolledUserIds,
+      data.enrolledStudentsList,
+      data.studentsList,
+    ]
+
+    for (const value of arrayFields) {
+      if (Array.isArray(value)) {
+        return value.length
+      }
+    }
+
+    return 0
+  }
 
   // Helper to upload with progress
   const uploadFileToS3 = (url: string, file: File, contentType: string) => {
@@ -82,29 +129,33 @@ export default function ContentManagementPage() {
   }
 
   useEffect(() => {
-    async function fetchContent() {
-      try {
-        const querySnapshot = await getDocs(collection(db, "courses"))
-        const fetched: ContentItem[] = []
-        querySnapshot.forEach((doc) => {
-          const data = doc.data()
-          fetched.push({
-            id: doc.id,
+    setLoading(true)
+
+    const unsubscribe = onSnapshot(
+      collection(db, "courses"),
+      (snapshot) => {
+        const fetched: ContentItem[] = snapshot.docs.map((snapshotDoc) => {
+          const data = snapshotDoc.data() as Record<string, any>
+          return {
+            id: snapshotDoc.id,
             title: data.title || "Untitled Course",
+            description: String(data.description || "").trim() || undefined,
             type: data.type || "Course",
             status: data.status || "Published",
-            students: Math.floor(Math.random() * 100) 
-          })
+            students: getRealtimeEnrollmentCount(data),
+            assetUrl: data.assetUrl || undefined,
+          }
         })
         setContentItems(fetched)
-      } catch (error) {
-        console.error("Error fetching content:", error)
-        // Fallback or empty state
-      } finally {
+        setLoading(false)
+      },
+      (error) => {
+        console.error("Error subscribing to content:", error)
         setLoading(false)
       }
-    }
-    fetchContent()
+    )
+
+    return () => unsubscribe()
   }, [])
 
   const createNew = async () => {
@@ -121,97 +172,117 @@ export default function ContentManagementPage() {
     try {
       const contentType = newFile.type || "application/octet-stream"
 
-      // 1. Get Presigned URL
-      const signedRes = await fetch("/api/content/signed-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-           filename: newFile.name,
-           contentType,
-           folder: "content"
+      let saved = false
+      let usedServerUploadFallback = false
+
+      try {
+        // 1. Get Presigned URL
+        const signedRes = await fetch("/api/content/signed-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: newFile.name,
+            contentType,
+            folder: "content",
+          }),
         })
-      })
-      
-      const signedJson = await signedRes.json().catch(() => ({}))
-      if (!signedRes.ok) {
-        throw new Error(String(signedJson?.error || "Failed to get upload URL"))
+
+        const signedJson = await signedRes.json().catch(() => ({}))
+        if (!signedRes.ok) {
+          throw new Error(String(signedJson?.error || "Failed to get upload URL"))
+        }
+
+        const { url, key, bucket } = signedJson
+
+        // 2. Upload directly to S3 with progress
+        await uploadFileToS3(url, newFile, contentType)
+
+        // 3. Create Record (Server-side)
+        const finalizeRes = await fetch("/api/content/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: newTitle.trim(),
+            description: newDescription.trim(),
+            key,
+            bucket,
+            contentType,
+            size: newFile.size,
+          }),
+        })
+
+        const finalizeJson = await finalizeRes.json().catch(() => ({}))
+        if (!finalizeRes.ok) {
+          // Fallback: store metadata from client if admin backend failed
+          const isText =
+            contentType.startsWith("text/") ||
+            contentType.includes("json") ||
+            contentType.includes("csv") ||
+            newFile.name.toLowerCase().endsWith(".txt") ||
+            newFile.name.toLowerCase().endsWith(".md")
+
+          await addDoc(collection(db, "courses"), {
+            title: newTitle.trim() || "Untitled Content",
+            description: newDescription.trim() || "",
+            assetUrl: String(finalizeJson?.url || "") || undefined,
+            assetKey: key,
+            bucket,
+            s3Key: key,
+            s3Bucket: bucket,
+            createdAt: serverTimestamp(),
+            type: isText ? "Document" : "Video",
+            status: "Published",
+            contentType,
+            size: newFile.size,
+            metadata: { processingStatus: "pending" },
+          })
+
+          toast({
+            title: "Saved to Firestore",
+            description: "Server save failed, so metadata was saved from the browser.",
+          })
+          saved = true
+        } else {
+          saved = true
+        }
+      } catch (directUploadError: any) {
+        // If browser->S3 upload fails (often CORS/policy/endpoint), fall back to server-side upload.
+        const form = new FormData()
+        form.append("title", newTitle.trim())
+        form.append("description", newDescription.trim())
+        form.append("folder", "content")
+        form.append("file", newFile)
+
+        const uploadRes = await fetch("/api/content/upload", {
+          method: "POST",
+          body: form,
+        })
+        const uploadJson = await uploadRes.json().catch(() => ({}))
+
+        if (!uploadRes.ok) {
+          throw new Error(String(uploadJson?.error || directUploadError?.message || "Failed to upload content"))
+        }
+
+        usedServerUploadFallback = true
+        saved = true
       }
 
-      const { url, key, bucket } = signedJson
-
-      // 2. Upload directly to S3 with progress
-      await uploadFileToS3(url, newFile, contentType)
-
-      // 3. Create Record (Server-side)
-      const finalizeRes = await fetch("/api/content/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newTitle.trim(),
-          key,
-          bucket,
-          contentType,
-          size: newFile.size
-        })
-      })
-
-      const finalizeJson = await finalizeRes.json().catch(() => ({}))
-      if (!finalizeRes.ok) {
-        // Fallback: store metadata from client if admin backend failed
-        const isText =
-          contentType.startsWith("text/") ||
-          contentType.includes("json") ||
-          contentType.includes("csv") ||
-          newFile.name.toLowerCase().endsWith(".txt") ||
-          newFile.name.toLowerCase().endsWith(".md")
-
-        await addDoc(collection(db, "courses"), {
-          title: newTitle.trim() || "Untitled Content",
-          assetUrl: String(finalizeJson?.url || "") || undefined,
-          assetKey: key,
-          bucket,
-          s3Key: key,
-          s3Bucket: bucket,
-          createdAt: serverTimestamp(),
-          type: isText ? "Document" : "Video",
-          status: "Published",
-          contentType,
-          size: newFile.size,
-          metadata: { processingStatus: "pending" },
-        })
-
+      if (saved) {
         toast({
-          title: "Saved to Firestore",
-          description: "Server save failed, so metadata was saved from the browser.",
+          title: "Content saved",
+          description: usedServerUploadFallback
+            ? "Uploaded via server fallback and saved in Firestore."
+            : "Uploaded to S3 and saved in Firestore.",
         })
-      } else {
-        toast({ title: "Content saved", description: "Uploaded to S3 and saved in Firestore." })
       }
       setCreateOpen(false)
       setNewTitle("")
+      setNewDescription("")
       setNewFile(null)
-      setLoading(true)
-
-      // Refresh
-      const querySnapshot = await getDocs(collection(db, "courses"))
-      const fetched: ContentItem[] = []
-      querySnapshot.forEach((doc) => {
-        const data = doc.data()
-        fetched.push({
-          id: doc.id,
-          title: data.title || "Untitled Course",
-          type: data.type || "Course",
-          status: data.status || "Published",
-          students: Math.floor(Math.random() * 100),
-          assetUrl: data.assetUrl || undefined,
-        })
-      })
-      setContentItems(fetched)
     } catch (e: any) {
       toast({ title: "Create failed", description: e?.message || "Failed to create", variant: "destructive" })
     } finally {
       setCreating(false)
-      setLoading(false)
     }
   }
 
@@ -239,37 +310,25 @@ export default function ContentManagementPage() {
         title: "Sync complete",
         description: `Created: ${json?.created ?? 0}, Skipped: ${json?.skipped ?? 0}`,
       })
-
-      // Refresh list
-      setLoading(true)
-      const querySnapshot = await getDocs(collection(db, "courses"))
-      const fetched: ContentItem[] = []
-      querySnapshot.forEach((doc) => {
-        const data = doc.data()
-        fetched.push({
-          id: doc.id,
-          title: data.title || "Untitled Course",
-          type: data.type || "Course",
-          status: data.status || "Published",
-          students: Math.floor(Math.random() * 100),
-          assetUrl: data.assetUrl || undefined,
-        })
-      })
-      setContentItems(fetched)
     } catch (e: any) {
       toast({ title: "Sync failed", description: e?.message || "Failed to sync", variant: "destructive" })
     } finally {
       setSyncing(false)
-      setLoading(false)
     }
   }
 
   const openEdit = (item: ContentItem) => {
     setEditingItem(item)
     setEditTitle(item.title || "")
+    setEditDescription(item.description || "")
     setEditType(item.type || "Course")
     setEditStatus(item.status || "Published")
     setEditOpen(true)
+  }
+
+  const openDelete = (item: ContentItem) => {
+    setDeletingItem(item)
+    setDeleteOpen(true)
   }
 
   const saveEdit = async () => {
@@ -283,6 +342,7 @@ export default function ContentManagementPage() {
       const ref = doc(db, "courses", editingItem.id)
       await updateDoc(ref, {
         title: editTitle.trim(),
+        description: editDescription.trim(),
         type: editType.trim() || "Course",
         status: editStatus.trim() || "Published",
       })
@@ -290,7 +350,13 @@ export default function ContentManagementPage() {
       setContentItems((prev) =>
         prev.map((it) =>
           it.id === editingItem.id
-            ? { ...it, title: editTitle.trim(), type: editType.trim() || "Course", status: editStatus.trim() || "Published" }
+            ? {
+                ...it,
+                title: editTitle.trim(),
+                description: editDescription.trim() || undefined,
+                type: editType.trim() || "Course",
+                status: editStatus.trim() || "Published",
+              }
             : it
         )
       )
@@ -300,6 +366,46 @@ export default function ContentManagementPage() {
       setEditingItem(null)
     } catch (e: any) {
       toast({ title: "Update failed", description: e?.message || "Failed to update", variant: "destructive" })
+    }
+  }
+
+  const deleteContent = async () => {
+    if (!deletingItem) return
+    if (!user) {
+      toast({ title: "Not signed in", description: "Sign in as admin first.", variant: "destructive" })
+      return
+    }
+
+    setDeletingId(deletingItem.id)
+    try {
+      const token = await user.getIdToken()
+      const res = await fetch(`/api/content/item/${encodeURIComponent(deletingItem.id)}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(String(json?.error || "Failed to delete content"))
+      }
+
+      setContentItems((prev) => prev.filter((item) => item.id !== deletingItem.id))
+      toast({
+        title: "Content deleted",
+        description: json?.deletedAsset
+          ? "The content item and its S3 file were removed."
+          : json?.assetDeleteError
+            ? "Content was removed from Firestore. S3 file could not be deleted with current AWS permissions."
+            : "The content item was removed.",
+      })
+      setDeleteOpen(false)
+      setDeletingItem(null)
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e?.message || "Failed to delete content", variant: "destructive" })
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -336,6 +442,15 @@ export default function ContentManagementPage() {
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="Lesson 1 - Introduction"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="content-description">Description</Label>
+                <Textarea
+                  id="content-description"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="Add a short description for this content"
                 />
               </div>
               <div className="space-y-2">
@@ -396,6 +511,10 @@ export default function ContentManagementPage() {
               <Input id="edit-title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea id="edit-description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="edit-type">Type</Label>
               <Input id="edit-type" value={editType} onChange={(e) => setEditType(e.target.value)} />
             </div>
@@ -415,6 +534,34 @@ export default function ContentManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open && !deletingId) {
+            setDeletingItem(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete content?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingItem
+                ? `This will permanently remove "${deletingItem.title}" from Firestore${user ? " and delete its uploaded S3 asset when one exists" : ""}.`
+                : "This will permanently remove the selected content item."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deletingId)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteContent} disabled={Boolean(deletingId)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deletingId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {loading ? (
         <div className="flex justify-center p-8">
@@ -448,8 +595,15 @@ export default function ContentManagementPage() {
               <Button variant="outline" size="sm" onClick={() => openEdit(item)}>
                 <Edit className="h-4 w-4 mr-2" /> Edit
               </Button>
-              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                <Trash2 className="h-4 w-4" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => openDelete(item)}
+                disabled={deletingId === item.id}
+                aria-label={`Delete ${item.title}`}
+              >
+                {deletingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               </Button>
             </CardFooter>
           </Card>

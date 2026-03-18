@@ -19,6 +19,7 @@ interface Course {
   level: string
   tags: string[]
   image?: string
+  videoThumbnailUrl?: string
 }
 
 export default function CoursesPage() {
@@ -31,19 +32,36 @@ export default function CoursesPage() {
        try {
          // Load from Firestore courses collection
          const querySnapshot = await getDocs(collection(db, "courses"))
-         const fetchedCourses: Course[] = []
-         querySnapshot.forEach((doc) => {
-           const data = doc.data()
-           fetchedCourses.push({
-             id: doc.id,
-             title: data.title || "Untitled Course",
-             description: data.description || "No description provided.",
-             duration: data.duration || "N/A",
-             level: data.level || "General",
-             tags: data.tags || [],
-             image: data.image
-           } as Course)
-         })
+         const fetchedCourses: Course[] = await Promise.all(
+           querySnapshot.docs.map(async (snapshotDoc) => {
+             const data = snapshotDoc.data() as Record<string, any>
+             const assetKey = String(data.assetKey || "").trim()
+             let resolvedVideoUrl = String(data.videoUrl || data.assetUrl || "").trim()
+
+             if (assetKey) {
+               try {
+                 const signedRes = await fetch(`/api/content/signed-url?key=${encodeURIComponent(assetKey)}`)
+                 const signedJson = await signedRes.json().catch(() => ({}))
+                 if (signedRes.ok && signedJson?.url) {
+                   resolvedVideoUrl = String(signedJson.url)
+                 }
+               } catch {
+                 // Keep fallback URL if signed URL resolution fails.
+               }
+             }
+
+             return {
+               id: snapshotDoc.id,
+               title: data.title || "Untitled Course",
+               description: data.description || "No description provided.",
+               duration: data.duration || "N/A",
+               level: data.level || "General",
+               tags: data.tags || [],
+               image: data.image,
+               videoThumbnailUrl: resolvedVideoUrl || undefined,
+             } as Course
+           })
+         )
          setCourses(fetchedCourses)
        } catch (error) {
          console.error("Error fetching courses:", error)
@@ -112,10 +130,32 @@ export default function CoursesPage() {
               filteredCourses.map((course) => (
                 <Card key={course.id} className="flex flex-col hover:shadow-lg transition-shadow">
                   <div className="aspect-video relative bg-muted rounded-t-xl overflow-hidden">
-                    {/* <Image src={course.image} fill alt={course.title} className="object-cover" /> */}
-                    <div className="absolute inset-0 flex items-center justify-center bg-primary/5">
-                      <BookOpen className="h-12 w-12 text-primary/20" />
-                    </div>
+                    {course.videoThumbnailUrl ? (
+                      <video
+                        src={course.videoThumbnailUrl}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        muted
+                        playsInline
+                        preload="metadata"
+                        onLoadedData={(event) => {
+                          // Ensure a stable poster-like first frame.
+                          const video = event.currentTarget
+                          if (video.currentTime < 0.1) {
+                            try {
+                              video.currentTime = 0.1
+                            } catch {
+                              // Ignore seek errors if browser blocks seeking before metadata.
+                            }
+                          }
+                        }}
+                      />
+                    ) : course.image ? (
+                      <img src={course.image} alt={course.title} className="absolute inset-0 h-full w-full object-cover" />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center bg-primary/5">
+                        <BookOpen className="h-12 w-12 text-primary/20" />
+                      </div>
+                    )}
                   </div>
                   <CardHeader>
                     <div className="flex justify-between items-start mb-2">
